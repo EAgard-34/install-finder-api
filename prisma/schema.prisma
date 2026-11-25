@@ -1,0 +1,203 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  MEMBER
+}
+
+enum InstallerTier {
+  COMMERCIAL
+  DOMESTIC
+  BOTH
+  UNKNOWN
+}
+
+enum InstallerSource {
+  GOOGLE_PLACES
+  FACEBOOK_LEAD
+  MANUAL
+}
+
+enum InstallerStatus {
+  NEW
+  INVITED
+  REGISTERED
+  ATTENDED
+  FIRST_ORDER
+  NOT_INTERESTED
+}
+
+enum InvitationStatus {
+  INVITED
+  REGISTERED
+  ATTENDED
+  DECLINED
+}
+
+enum EnrichmentStatus {
+  NONE
+  PENDING
+  DONE
+  FAILED
+}
+
+model User {
+  id          String   @id @default(uuid())
+  firebaseUid String?  @unique
+  email       String   @unique
+  name        String
+  role        UserRole @default(MEMBER)
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  installers Installer[] @relation("InstallerCreatedBy")
+}
+
+/// Offline-first: id is generated on the phone (uuid). `updatedAt` is the
+/// client's edit time (last write wins); `serverUpdatedAt` is the sync cursor.
+model Installer {
+  id               String           @id
+  /// ISO 3166-1 alpha-2, e.g. TT, JM, GY, SR
+  country          String           @default("TT")
+  name             String
+  /// Phones are E.164, e.g. +18681234567
+  phone            String?
+  whatsapp         String?
+  email            String?
+  website          String?
+  facebookUrl      String?
+  address          String?
+  area             String?
+  tier             InstallerTier    @default(UNKNOWN)
+  brands           String[]         @default([])
+  source           InstallerSource  @default(MANUAL)
+  googlePlaceId    String?          @unique
+  /// Meta lead ad id, so a webhook delivered twice never creates two leads
+  fbLeadId         String?          @unique
+  status           InstallerStatus  @default(NEW)
+  notes            String?
+  optOut           Boolean          @default(false)
+  /// Badge: legally registered business (registration number required)
+  registeredBusiness Boolean        @default(false)
+  businessRegNo    String?
+  /// Badge: registered Dahua partner / dealer
+  dahuaPartner     Boolean          @default(false)
+  enrichmentStatus EnrichmentStatus @default(NONE)
+  createdById      String?
+  createdBy        User?            @relation("InstallerCreatedBy", fields: [createdById], references: [id])
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime
+  serverUpdatedAt  DateTime         @updatedAt
+  deletedAt        DateTime?
+
+  invitations Invitation[]
+  promoSends  PromoSend[]
+
+  @@index([serverUpdatedAt])
+  @@index([country])
+  @@index([phone])
+  @@index([status])
+}
+
+model TrainingSession {
+  id              String    @id
+  country         String    @default("TT")
+  title           String
+  venue           String
+  startsAt        DateTime
+  endsAt          DateTime
+  capacity        Int
+  notes           String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime
+  serverUpdatedAt DateTime  @updatedAt
+  deletedAt       DateTime?
+
+  invitations Invitation[]
+
+  @@index([serverUpdatedAt])
+}
+
+model Invitation {
+  id              String           @id
+  installerId     String
+  sessionId       String
+  status          InvitationStatus @default(INVITED)
+  /// Short code shown as a QR and as text in the WhatsApp message
+  checkInCode     String           @unique
+  invitedAt       DateTime?
+  registeredAt    DateTime?
+  attendedAt      DateTime?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime
+  serverUpdatedAt DateTime         @updatedAt
+  deletedAt       DateTime?
+
+  installer Installer       @relation(fields: [installerId], references: [id])
+  session   TrainingSession @relation(fields: [sessionId], references: [id])
+
+  @@unique([installerId, sessionId])
+  @@index([serverUpdatedAt])
+}
+
+/// A promo message template, sent to installers by WhatsApp click-to-send
+model Promotion {
+  id              String    @id
+  country         String
+  title           String
+  message         String
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime
+  serverUpdatedAt DateTime  @updatedAt
+  deletedAt       DateTime?
+
+  sends PromoSend[]
+
+  @@index([serverUpdatedAt])
+  @@index([country])
+}
+
+/// Who a promo was opened in WhatsApp for (so a broadcast never repeats someone)
+model PromoSend {
+  id              String    @id
+  promotionId     String
+  installerId     String
+  sentAt          DateTime
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime
+  serverUpdatedAt DateTime  @updatedAt
+  deletedAt       DateTime?
+
+  promotion Promotion @relation(fields: [promotionId], references: [id])
+  installer Installer @relation(fields: [installerId], references: [id])
+
+  @@unique([promotionId, installerId])
+  @@index([serverUpdatedAt])
+}
+
+/// Distributor that filtered installer lists are sent to
+model Distributor {
+  id              String    @id
+  country         String
+  name            String
+  contactName     String?
+  /// E.164
+  whatsapp        String?
+  email           String?
+  notes           String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime
+  serverUpdatedAt DateTime  @updatedAt
+  deletedAt       DateTime?
+
+  @@index([serverUpdatedAt])
+  @@index([country])
+}
